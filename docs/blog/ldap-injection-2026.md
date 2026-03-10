@@ -1,0 +1,65 @@
+# LDAP Injection in go-authcrunch
+
+I found a critical vulnerability in go-authcrunch's LDAP authenticator. Three functions don't escape user input before putting it into LDAP filter queries.
+
+## The Bug
+
+In `pkg/ids/ldap/authenticator.go`, lines 323, 430, and 559:
+
+```go
+searchUserFilter := strings.ReplaceAll(sa.searchUserFilter, "%s", r.User.Username)
+```
+
+The username goes straight into the filter with zero escaping. If I control the username, I control the LDAP filter.
+
+## What You Can Do
+
+**User Enumeration:**
+Send username: `*`
+
+Normal filter: `(&(sAMAccountName=john)(objectclass=user))`  
+Result: Matches john
+
+Injected filter: `(&(sAMAccountName=*)(objectclass=user))`  
+Result: Matches EVERY user in the directory
+
+**Data Extraction:**
+Send username: `admin*))(&(uid=admin`
+
+This creates a malformed filter that uses boolean logic to check if admin exists, without actually seeing the results. You can enumerate the directory blindly.
+
+**DoS:**
+Send a username that creates an expensive filter query. The LDAP server burns CPU trying to process it.
+
+## The Fix
+
+Replace the three vulnerable lines with:
+
+```go
+escapedUsername := ldap.EscapeFilter(r.User.Username)
+searchUserFilter := strings.ReplaceAll(sa.searchUserFilter, "%s", escapedUsername)
+```
+
+`ldap.EscapeFilter()` escapes the dangerous characters:
+- `*` → `\2a`
+- `(` → `\28`
+- `)` → `\29`
+
+Now if someone sends `*`, it matches only a user literally named `*`, not all users.
+
+## Testing
+
+I wrote two tests to verify the vulnerability and the fix:
+
+```
+TestLDAPInjection: Shows the wildcard bypass works
+TestEscapeFilter: Validates that escaping prevents it
+```
+
+Both pass, run `go test ./pkg/ids/ldap -v` to check.
+
+## References
+
+- CWE-90: https://cwe.mitre.org/data/definitions/90.html
+- OWASP LDAP Injection: https://owasp.org/www-community/attacks/LDAP_Injection
+- go-ldap library: https://github.com/go-ldap/ldap
