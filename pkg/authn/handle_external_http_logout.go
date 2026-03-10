@@ -86,6 +86,12 @@ func (p *Portal) handleHTTPExternalLogout(ctx context.Context, w http.ResponseWr
 		return p.handleHTTPRedirect(ctx, w, r, rr, "/login")
 	}
 
+	if v, exists := cfg["logout_url"]; exists {
+		if customURL, ok := v.(string); ok && customURL != "" {
+			return p.handleHTTPRedirectExternal(ctx, w, r, rr, customURL)
+		}
+	}
+
 	providerLogoutURL := provider.GetLogoutURL()
 	if providerLogoutURL == "" {
 		return p.handleHTTPRedirect(ctx, w, r, rr, "/login")
@@ -105,3 +111,4 @@ func (p *Portal) handleHTTPExternalLogout(ctx context.Context, w http.ResponseWr
 
 	return p.handleHTTPRedirectExternal(ctx, w, r, rr, providerLogoutURL)
 }
+
